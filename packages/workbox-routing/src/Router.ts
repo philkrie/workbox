@@ -7,18 +7,18 @@
 */
 
 import {assert} from 'workbox-core/_private/assert.js';
-import {logger} from 'workbox-core/_private/logger.js';
-import {WorkboxError} from 'workbox-core/_private/WorkboxError.js';
 import {getFriendlyURL} from 'workbox-core/_private/getFriendlyURL.js';
-import {Route} from './Route.js';
-import {HTTPMethod} from './utils/constants.js';
+import {Handler, HandlerObject, HandlerCallbackOptions, MatchCallbackOptions}
+    from './_types.js';
+import {HTTPMethod, defaultMethod} from './utils/constants.js';
+import {logger} from 'workbox-core/_private/logger.js';
 import {normalizeHandler} from './utils/normalizeHandler.js';
-import {Handler, HandlerObject, HandlerCallbackOptions} from './_types.js';
+import {Route} from './Route.js';
+import {WorkboxError} from 'workbox-core/_private/WorkboxError.js';
+
 import './_version.js';
 
-
 type RequestArgs = string | [string, RequestInit?];
-
 
 interface CacheURLsMessageData {
   type: string;
@@ -46,7 +46,7 @@ interface CacheURLsMessageData {
  */
 class Router {
   private readonly _routes: Map<HTTPMethod, Route[]>;
-  private _defaultHandler?: HandlerObject;
+  private readonly _defaultHandlerMap: Map<HTTPMethod, HandlerObject>;
   private _catchHandler?: HandlerObject;
 
   /**
@@ -54,6 +54,7 @@ class Router {
    */
   constructor() {
     this._routes = new Map();
+    this._defaultHandlerMap = new Map();
   }
 
   /**
@@ -171,7 +172,13 @@ class Router {
       return;
     }
 
-    const {params, route} = this.findMatchingRoute({url, request, event});
+    const sameOrigin = url.origin === location.origin;
+    const {params, route} = this.findMatchingRoute({
+      event,
+      request,
+      sameOrigin,
+      url,
+    });
     let handler = route && route.handler;
 
     const debugMessages = [];
@@ -191,12 +198,13 @@ class Router {
 
     // If we don't have a handler because there was no matching route, then
     // fall back to defaultHandler if that's defined.
-    if (!handler && this._defaultHandler) {
+    const method = request.method as HTTPMethod;
+    if (!handler && this._defaultHandlerMap.has(method)) {
       if (process.env.NODE_ENV !== 'production') {
         debugMessages.push(`Failed to find a matching route. Falling ` +
-          `back to the default handler.`);
+          `back to the default handler for ${method}.`);
       }
-      handler = this._defaultHandler;
+      handler = this._defaultHandlerMap.get(method);
     }
 
     if (!handler) {
@@ -264,30 +272,12 @@ class Router {
    *     They are populated if a matching route was found or `undefined`
    *     otherwise.
    */
-  findMatchingRoute({url, request, event}: {
-    url: URL;
-    request: Request;
-    event?: ExtendableEvent;
-  }): {route?: Route; params?: HandlerCallbackOptions['params']} {
-    if (process.env.NODE_ENV !== 'production') {
-      assert!.isInstance(url, URL, {
-        moduleName: 'workbox-routing',
-        className: 'Router',
-        funcName: 'findMatchingRoute',
-        paramName: 'options.url',
-      });
-      assert!.isInstance(request, Request, {
-        moduleName: 'workbox-routing',
-        className: 'Router',
-        funcName: 'findMatchingRoute',
-        paramName: 'options.request',
-      });
-    }
-
+  findMatchingRoute({url, sameOrigin, request, event}: MatchCallbackOptions):
+      {route?: Route; params?: HandlerCallbackOptions['params']} {
     const routes = this._routes.get(request.method as HTTPMethod) || [];
     for (const route of routes) {
       let params;
-      const matchResult = route.match({url, request, event});
+      const matchResult = route.match({url, sameOrigin, request, event});
       if (matchResult) {
         // See https://github.com/GoogleChrome/workbox/issues/2079
         params = matchResult;
@@ -316,15 +306,19 @@ class Router {
   /**
    * Define a default `handler` that's called when no routes explicitly
    * match the incoming request.
+   * 
+   * Each HTTP method ('GET', 'POST', etc.) gets its own default handler.
    *
    * Without a default handler, unmatched requests will go against the
    * network as if there were no service worker present.
    *
    * @param {module:workbox-routing~handlerCallback} handler A callback
    * function that returns a Promise resulting in a Response.
+   * @param {string} [method='GET'] The HTTP method to associate with this
+   * default handler. Each method has its own default.
    */
-  setDefaultHandler(handler: Handler) {
-    this._defaultHandler = normalizeHandler(handler);
+  setDefaultHandler(handler: Handler, method: HTTPMethod = defaultMethod) {
+    this._defaultHandlerMap.set(method, normalizeHandler(handler));
   }
 
   /**
