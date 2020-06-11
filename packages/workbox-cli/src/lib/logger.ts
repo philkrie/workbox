@@ -6,11 +6,11 @@
   https://opensource.org/licenses/MIT.
 */
 
-const chalk = require('chalk');
+import * as chalk from 'chalk';
 
-module.exports = {
-  debug: (...args) => console.log(chalk.gray(...args)),
-  log: (...args) => console.log(...args),
-  warn: (...args) => console.warn(chalk.yellow(...args)),
-  error: (...args) => console.error(chalk.red.bold(...args)),
+export const logger = {
+  debug: (...args: string[]) => console.log(chalk.gray(...args)),
+  log: (...args: string[]) => console.log(...args),
+  warn: (...args: string[]) => console.warn(chalk.yellow(...args)),
+  error: (...args: string[]) => console.error(chalk.red.bold(...args)),
 };
